@@ -13,3 +13,4 @@
 - Keep provider data siloed: when rendering usage or account info for a provider (Claude vs Codex), never display identity/plan fields sourced from a different provider.\*\*\*
 - Claude CLI status line is custom + user-configurable; never rely on it for usage parsing.
 - Cookie imports: default Chrome-only when possible to avoid other browser prompts; override via browser list when needed.
+- When creating PR requests, omit agent-file commits and do not push them upstream because users may want their own agent setup. Explicit commits to omit: `05ef1cfb3c2cd80f0b2f2e6b75984306812373f8`, `2bb2e5057a3760cd17375a0346293e6ff3e93e50`, `ae26619c3d224435ef0471eba075b2815ad855bd`.

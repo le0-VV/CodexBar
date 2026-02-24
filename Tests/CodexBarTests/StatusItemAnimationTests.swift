@@ -83,6 +83,8 @@ struct StatusItemAnimationTests {
         settings.mergeIcons = true
         settings.selectedMenuProvider = .codex
         settings.menuBarShowsBrandIconWithPercent = false
+        settings.codexMenuBarVisualizationMode = .classic
+        settings.codexMenuBarVisualizationMode = .classic
 
         let registry = ProviderRegistry.shared
         if let codexMeta = registry.metadata[.codex] {
@@ -516,6 +518,71 @@ struct StatusItemAnimationTests {
             .replacingOccurrences(of: " left", with: "")
 
         #expect(displayText == expected)
+    }
+
+    @Test
+    func codexPieRingModeSelectionHonorsProviderAndBrandMode() {
+        let settings = SettingsStore(
+            configStore: testConfigStore(suiteName: "StatusItemAnimationTests-codex-pie-ring"),
+            zaiTokenStore: NoopZaiTokenStore(),
+            syntheticTokenStore: NoopSyntheticTokenStore())
+        settings.statusChecksEnabled = false
+        settings.refreshFrequency = .manual
+        settings.mergeIcons = true
+        settings.selectedMenuProvider = .codex
+        settings.menuBarShowsBrandIconWithPercent = false
+        settings.codexMenuBarVisualizationMode = .classic
+
+        let fetcher = UsageFetcher()
+        let store = UsageStore(fetcher: fetcher, browserDetection: BrowserDetection(cacheTTL: 0), settings: settings)
+        let controller = StatusItemController(
+            store: store,
+            settings: settings,
+            account: fetcher.loadAccountInfo(),
+            updater: DisabledUpdaterController(),
+            preferencesSelection: PreferencesSelection(),
+            statusBar: self.makeStatusBarForTesting())
+
+        #expect(controller.shouldUseCodexPieRingMenuBarIcon(provider: .codex, showBrandPercent: false) == false)
+        settings.codexMenuBarVisualizationMode = .pieRing
+        #expect(controller.shouldUseCodexPieRingMenuBarIcon(provider: .codex, showBrandPercent: false))
+        settings.codexMenuBarVisualizationMode = .pieRingSwapped
+        #expect(controller.shouldUseCodexPieRingMenuBarIcon(provider: .codex, showBrandPercent: false))
+        #expect(controller.shouldUseCodexPieRingMenuBarIcon(provider: .claude, showBrandPercent: false) == false)
+        #expect(controller.shouldUseCodexPieRingMenuBarIcon(provider: .codex, showBrandPercent: true) == false)
+    }
+
+    @Test
+    func codexPieRingIconRendersWeeklyPieAndSessionRingFills() {
+        let partialUsage = IconRenderer.makeCodexPieRingIcon(
+            weeklyUsed: 25,
+            sessionUsed: 25,
+            mode: .pieRing,
+            stale: false)
+        let fullUsage = IconRenderer.makeCodexPieRingIcon(
+            weeklyUsed: 100,
+            sessionUsed: 100,
+            mode: .pieRing,
+            stale: false)
+        let swappedUsage = IconRenderer.makeCodexPieRingIcon(
+            weeklyUsed: 25,
+            sessionUsed: 25,
+            mode: .pieRingSwapped,
+            stale: false)
+
+        let partialRep = partialUsage.representations.compactMap { $0 as? NSBitmapImageRep }.first(where: {
+            $0.pixelsWide == 36 && $0.pixelsHigh == 36
+        })
+        let fullRep = fullUsage.representations.compactMap { $0 as? NSBitmapImageRep }.first(where: {
+            $0.pixelsWide == 36 && $0.pixelsHigh == 36
+        })
+        let swappedRep = swappedUsage.representations.compactMap { $0 as? NSBitmapImageRep }.first(where: {
+            $0.pixelsWide == 36 && $0.pixelsHigh == 36
+        })
+
+        #expect(partialRep != nil)
+        #expect(fullRep != nil)
+        #expect(swappedRep != nil)
     }
 
     @Test

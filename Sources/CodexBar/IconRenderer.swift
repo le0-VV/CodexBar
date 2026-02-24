@@ -763,6 +763,105 @@ enum IconRenderer {
 
     // swiftlint:enable function_body_length
 
+    static func makeCodexPieRingIcon(
+        weeklyUsed: Double?,
+        sessionUsed: Double?,
+        mode: CodexMenuBarVisualizationMode,
+        stale: Bool,
+        statusIndicator: ProviderStatusIndicator = .none) -> NSImage
+    {
+        self.renderImage {
+            let baseFill = NSColor.labelColor
+            let trackFillAlpha: CGFloat = stale ? 0.18 : 0.28
+            let trackStrokeAlpha: CGFloat = stale ? 0.28 : 0.44
+            let fillColor = baseFill.withAlphaComponent(stale ? 0.55 : 1.0)
+            let center = CGPoint(x: self.outputSize.width / 2, y: self.outputSize.height / 2)
+
+            let outerRadius: CGFloat = 7.2
+            let outerRingWidth: CGFloat = 2.0
+            let ringGap: CGFloat = 0.8
+            let innerPieRadius = outerRadius - outerRingWidth - ringGap
+
+            let innerUsed = mode.placesWeeklyInOuterRing ? sessionUsed : weeklyUsed
+            let outerUsed = mode.placesWeeklyInOuterRing ? weeklyUsed : sessionUsed
+            let innerProgress = max(0, min((innerUsed ?? 0) / 100, 1))
+            let outerProgress = max(0, min((outerUsed ?? 0) / 100, 1))
+            let innerUnusedProgress = 1 - innerProgress
+            let outerUnusedProgress = 1 - outerProgress
+            let trackFillColor = baseFill.withAlphaComponent(trackFillAlpha)
+            let trackStrokeColor = baseFill.withAlphaComponent(trackStrokeAlpha)
+
+            let innerTrack = NSBezierPath(
+                ovalIn: CGRect(
+                    x: center.x - innerPieRadius,
+                    y: center.y - innerPieRadius,
+                    width: innerPieRadius * 2,
+                    height: innerPieRadius * 2))
+            trackFillColor.setFill()
+            innerTrack.fill()
+
+            if innerUsed != nil, innerUnusedProgress > 0 {
+                fillColor.setFill()
+                if innerUnusedProgress >= 0.999 {
+                    innerTrack.fill()
+                } else {
+                    let startAngle: CGFloat = 90
+                    let usedEndAngle = startAngle - (innerProgress * 360)
+                    let wedge = NSBezierPath()
+                    wedge.move(to: center)
+                    wedge.appendArc(
+                        withCenter: center,
+                        radius: innerPieRadius,
+                        startAngle: usedEndAngle,
+                        endAngle: startAngle,
+                        clockwise: true)
+                    wedge.close()
+                    wedge.fill()
+                }
+            }
+
+            let innerStroke = NSBezierPath(
+                ovalIn: CGRect(
+                    x: center.x - innerPieRadius,
+                    y: center.y - innerPieRadius,
+                    width: innerPieRadius * 2,
+                    height: innerPieRadius * 2))
+            innerStroke.lineWidth = 1
+            trackStrokeColor.setStroke()
+            innerStroke.stroke()
+
+            let ringRect = CGRect(
+                x: center.x - outerRadius,
+                y: center.y - outerRadius,
+                width: outerRadius * 2,
+                height: outerRadius * 2)
+
+            let outerTrack = NSBezierPath(ovalIn: ringRect)
+            outerTrack.lineWidth = outerRingWidth
+            outerTrack.lineCapStyle = .round
+            trackStrokeColor.setStroke()
+            outerTrack.stroke()
+
+            if outerUsed != nil, outerUnusedProgress > 0 {
+                let startAngle: CGFloat = 90
+                let usedEndAngle = startAngle - (outerProgress * 360)
+                let outerArc = NSBezierPath()
+                outerArc.lineWidth = outerRingWidth
+                outerArc.lineCapStyle = .round
+                outerArc.appendArc(
+                    withCenter: center,
+                    radius: outerRadius,
+                    startAngle: usedEndAngle,
+                    endAngle: startAngle,
+                    clockwise: true)
+                fillColor.setStroke()
+                outerArc.stroke()
+            }
+
+            Self.drawStatusOverlay(indicator: statusIndicator)
+        }
+    }
+
     /// Morph helper: unbraids a simplified knot into our bar icon.
     static func makeMorphIcon(progress: Double, style: IconStyle) -> NSImage {
         let clamped = max(0, min(progress, 1))

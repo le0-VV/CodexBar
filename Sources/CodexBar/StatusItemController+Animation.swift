@@ -269,6 +269,28 @@ extension StatusItemController {
             return
         }
 
+        if self.shouldUseCodexPieRingMenuBarIcon(provider: primaryProvider, showBrandPercent: showBrandPercent) {
+            var weeklyUsed = snapshot?.secondary?.usedPercent
+            var sessionUsed = snapshot?.primary?.usedPercent
+            if let phase, needsAnimation {
+                let pattern = self.animationPattern
+                sessionUsed = max(pattern.value(phase: phase), Self.loadingPercentEpsilon)
+                weeklyUsed = max(
+                    pattern.value(phase: phase + pattern.secondaryOffset),
+                    Self.loadingPercentEpsilon)
+            }
+
+            self.setButtonTitle(nil, for: button)
+            let image = IconRenderer.makeCodexPieRingIcon(
+                weeklyUsed: weeklyUsed,
+                sessionUsed: sessionUsed,
+                mode: self.settings.codexMenuBarVisualizationMode,
+                stale: stale,
+                statusIndicator: statusIndicator)
+            self.setButtonImage(image, for: button)
+            return
+        }
+
         self.setButtonTitle(nil, for: button)
         if let morphProgress {
             let image = IconRenderer.makeMorphIcon(progress: morphProgress, style: style)
@@ -295,6 +317,7 @@ extension StatusItemController {
         // user setting we pass either "percent left" or "percent used".
         let showUsed = self.settings.usageBarsShowUsed
         let showBrandPercent = self.settings.menuBarShowsBrandIconWithPercent
+        var stale = self.store.isStale(provider: provider)
 
         if showBrandPercent,
            let brand = ProviderBrandIcon.image(for: provider)
@@ -314,6 +337,28 @@ extension StatusItemController {
                     brand: brand,
                     statusIndicator: self.store.statusIndicator(for: provider)),
                 for: button)
+            return
+        }
+
+        if self.shouldUseCodexPieRingMenuBarIcon(provider: provider, showBrandPercent: showBrandPercent) {
+            var weeklyUsed = snapshot?.secondary?.usedPercent
+            var sessionUsed = snapshot?.primary?.usedPercent
+            if let phase, self.shouldAnimate(provider: provider) {
+                let pattern = self.animationPattern
+                sessionUsed = max(pattern.value(phase: phase), Self.loadingPercentEpsilon)
+                weeklyUsed = max(
+                    pattern.value(phase: phase + pattern.secondaryOffset),
+                    Self.loadingPercentEpsilon)
+            }
+
+            self.setButtonTitle(nil, for: button)
+            let image = IconRenderer.makeCodexPieRingIcon(
+                weeklyUsed: weeklyUsed,
+                sessionUsed: sessionUsed,
+                mode: self.settings.codexMenuBarVisualizationMode,
+                stale: stale,
+                statusIndicator: self.store.statusIndicator(for: provider))
+            self.setButtonImage(image, for: button)
             return
         }
         var primary = showUsed ? snapshot?.primary?.usedPercent : snapshot?.primary?.remainingPercent
@@ -336,7 +381,6 @@ extension StatusItemController {
             weekly = Self.loadingPercentEpsilon
         }
         var credits: Double? = provider == .codex ? self.store.credits?.remaining : nil
-        var stale = self.store.isStale(provider: provider)
         var morphProgress: Double?
 
         if let phase, self.shouldAnimate(provider: provider) {
@@ -387,6 +431,12 @@ extension StatusItemController {
                 statusIndicator: self.store.statusIndicator(for: provider))
             self.setButtonImage(image, for: button)
         }
+    }
+
+    func shouldUseCodexPieRingMenuBarIcon(provider: UsageProvider, showBrandPercent: Bool) -> Bool {
+        provider == .codex &&
+            !showBrandPercent &&
+            self.settings.codexMenuBarVisualizationMode.usesPieRingLayout
     }
 
     private func setButtonImage(_ image: NSImage, for button: NSStatusBarButton) {

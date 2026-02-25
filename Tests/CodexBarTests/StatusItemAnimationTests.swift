@@ -6,6 +6,23 @@ import Testing
 @MainActor
 @Suite
 struct StatusItemAnimationTests {
+    private let outerRingSamplePoints: [(Int, Int)] = [
+        (16, 31), (17, 31), (18, 31), (19, 31), (20, 31),
+        (16, 32), (17, 32), (18, 32), (19, 32), (20, 32),
+    ]
+
+    private func alphaAt(_ x: Int, _ y: Int, in rep: NSBitmapImageRep) -> CGFloat {
+        (rep.colorAt(x: x, y: y) ?? .clear).alphaComponent
+    }
+
+    private func averageAlpha(in rep: NSBitmapImageRep, points: [(Int, Int)]) -> CGFloat {
+        guard !points.isEmpty else { return 0 }
+        let total = points.reduce(CGFloat(0)) { partial, point in
+            partial + self.alphaAt(point.0, point.1, in: rep)
+        }
+        return total / CGFloat(points.count)
+    }
+
     private func maxAlpha(in rep: NSBitmapImageRep) -> CGFloat {
         var maxAlpha: CGFloat = 0
         for x in 0..<rep.pixelsWide {
@@ -564,10 +581,29 @@ struct StatusItemAnimationTests {
             sessionUsed: 100,
             mode: .pieRing,
             stale: false)
+        let zeroUsage = IconRenderer.makeCodexPieRingIcon(
+            weeklyUsed: 0,
+            sessionUsed: 0,
+            mode: .pieRing,
+            stale: false)
         let swappedUsage = IconRenderer.makeCodexPieRingIcon(
             weeklyUsed: 25,
             sessionUsed: 25,
             mode: .pieRingSwapped,
+            stale: false)
+        let invalidRingAvailableFlash = IconRenderer.makeCodexPieRingIcon(
+            weeklyUsed: 25,
+            sessionUsed: nil,
+            mode: .pieRing,
+            invalidCharts: [.ring],
+            flashInvalidChartsAsUsed: false,
+            stale: false)
+        let invalidRingUsedFlash = IconRenderer.makeCodexPieRingIcon(
+            weeklyUsed: 25,
+            sessionUsed: nil,
+            mode: .pieRing,
+            invalidCharts: [.ring],
+            flashInvalidChartsAsUsed: true,
             stale: false)
 
         let partialRep = partialUsage.representations.compactMap { $0 as? NSBitmapImageRep }.first(where: {
@@ -576,13 +612,38 @@ struct StatusItemAnimationTests {
         let fullRep = fullUsage.representations.compactMap { $0 as? NSBitmapImageRep }.first(where: {
             $0.pixelsWide == 36 && $0.pixelsHigh == 36
         })
+        let zeroRep = zeroUsage.representations.compactMap { $0 as? NSBitmapImageRep }.first(where: {
+            $0.pixelsWide == 36 && $0.pixelsHigh == 36
+        })
         let swappedRep = swappedUsage.representations.compactMap { $0 as? NSBitmapImageRep }.first(where: {
             $0.pixelsWide == 36 && $0.pixelsHigh == 36
         })
+        let invalidRingAvailableRep =
+            invalidRingAvailableFlash.representations.compactMap { $0 as? NSBitmapImageRep }.first(where: {
+                $0.pixelsWide == 36 && $0.pixelsHigh == 36
+            })
+        let invalidRingUsedRep = invalidRingUsedFlash.representations.compactMap { $0 as? NSBitmapImageRep }
+            .first(where: {
+                $0.pixelsWide == 36 && $0.pixelsHigh == 36
+            })
 
         #expect(partialRep != nil)
         #expect(fullRep != nil)
+        #expect(zeroRep != nil)
         #expect(swappedRep != nil)
+        #expect(invalidRingAvailableRep != nil)
+        #expect(invalidRingUsedRep != nil)
+
+        if let zeroRep, let fullRep {
+            let zeroOuterAlpha = self.averageAlpha(in: zeroRep, points: self.outerRingSamplePoints)
+            let fullOuterAlpha = self.averageAlpha(in: fullRep, points: self.outerRingSamplePoints)
+            #expect(zeroOuterAlpha > fullOuterAlpha + 0.06)
+        }
+        if let invalidRingAvailableRep, let invalidRingUsedRep {
+            let availableOuterAlpha = self.averageAlpha(in: invalidRingAvailableRep, points: self.outerRingSamplePoints)
+            let usedOuterAlpha = self.averageAlpha(in: invalidRingUsedRep, points: self.outerRingSamplePoints)
+            #expect(availableOuterAlpha > usedOuterAlpha + 0.06)
+        }
     }
 
     @Test

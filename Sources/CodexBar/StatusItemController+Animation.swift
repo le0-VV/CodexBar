@@ -349,8 +349,8 @@ extension StatusItemController {
         }
 
         if self.shouldUseCodexPieRingMenuBarIcon(provider: primaryProvider, showBrandPercent: showBrandPercent) {
-            var weeklyUsed = snapshot?.secondary?.usedPercent
-            var sessionUsed = snapshot?.primary?.usedPercent
+            var weeklyUsed = showUsed ? snapshot?.secondary?.usedPercent : snapshot?.secondary?.remainingPercent
+            var sessionUsed = showUsed ? snapshot?.primary?.usedPercent : snapshot?.primary?.remainingPercent
             let mode = self.settings.codexMenuBarVisualizationMode
             if let phase, needsAnimation {
                 let pattern = self.animationPattern
@@ -429,8 +429,8 @@ extension StatusItemController {
         }
 
         if self.shouldUseCodexPieRingMenuBarIcon(provider: provider, showBrandPercent: showBrandPercent) {
-            var weeklyUsed = snapshot?.secondary?.usedPercent
-            var sessionUsed = snapshot?.primary?.usedPercent
+            var weeklyUsed = showUsed ? snapshot?.secondary?.usedPercent : snapshot?.secondary?.remainingPercent
+            var sessionUsed = showUsed ? snapshot?.primary?.usedPercent : snapshot?.primary?.remainingPercent
             let mode = self.settings.codexMenuBarVisualizationMode
             if let phase, self.shouldAnimate(provider: provider) {
                 let pattern = self.animationPattern

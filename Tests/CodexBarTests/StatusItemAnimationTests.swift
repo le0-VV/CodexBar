@@ -570,6 +570,66 @@ struct StatusItemAnimationTests {
     }
 
     @Test
+    func codexPieRingRespectsShowUsedPreference() {
+        let settings = SettingsStore(
+            configStore: testConfigStore(suiteName: "StatusItemAnimationTests-codex-pie-ring-show-used"),
+            zaiTokenStore: NoopZaiTokenStore(),
+            syntheticTokenStore: NoopSyntheticTokenStore())
+        settings.statusChecksEnabled = false
+        settings.refreshFrequency = .manual
+        settings.mergeIcons = false
+        settings.menuBarShowsBrandIconWithPercent = false
+        settings.codexMenuBarVisualizationMode = .pieRing
+        settings.usageBarsShowUsed = true
+
+        let registry = ProviderRegistry.shared
+        if let codexMeta = registry.metadata[.codex] {
+            settings.setProviderEnabled(provider: .codex, metadata: codexMeta, enabled: true)
+        }
+
+        let fetcher = UsageFetcher()
+        let store = UsageStore(fetcher: fetcher, browserDetection: BrowserDetection(cacheTTL: 0), settings: settings)
+        let controller = StatusItemController(
+            store: store,
+            settings: settings,
+            account: fetcher.loadAccountInfo(),
+            updater: DisabledUpdaterController(),
+            preferencesSelection: PreferencesSelection(),
+            statusBar: self.makeStatusBarForTesting())
+
+        let snapshot = UsageSnapshot(
+            primary: RateWindow(usedPercent: 20, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+            secondary: RateWindow(usedPercent: 30, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+            updatedAt: Date())
+        store._setSnapshotForTesting(snapshot, provider: .codex)
+        store._setErrorForTesting(nil, provider: .codex)
+
+        controller.applyIcon(for: .codex, phase: nil)
+        let showUsedImage = controller.statusItems[.codex]?.button?.image
+
+        settings.usageBarsShowUsed = false
+        controller.applyIcon(for: .codex, phase: nil)
+        let showRemainingImage = controller.statusItems[.codex]?.button?.image
+
+        let expectedShowUsedImage = IconRenderer.makeCodexPieRingIcon(
+            weeklyUsed: 30,
+            sessionUsed: 20,
+            mode: .pieRing,
+            stale: false)
+        let expectedShowRemainingImage = IconRenderer.makeCodexPieRingIcon(
+            weeklyUsed: 70,
+            sessionUsed: 80,
+            mode: .pieRing,
+            stale: false)
+
+        #expect(showUsedImage?.tiffRepresentation != nil)
+        #expect(showRemainingImage?.tiffRepresentation != nil)
+
+        #expect(showUsedImage?.tiffRepresentation == expectedShowUsedImage.tiffRepresentation)
+        #expect(showRemainingImage?.tiffRepresentation == expectedShowRemainingImage.tiffRepresentation)
+    }
+
+    @Test
     func codexPieRingIconRendersWeeklyPieAndSessionRingFills() {
         let partialUsage = IconRenderer.makeCodexPieRingIcon(
             weeklyUsed: 25,

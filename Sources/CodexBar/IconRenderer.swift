@@ -1,6 +1,13 @@
 import AppKit
 import CodexBarCore
 
+struct CodexPieRingInvalidCharts: OptionSet, Sendable {
+    let rawValue: Int
+
+    static let pie = Self(rawValue: 1 << 0)
+    static let ring = Self(rawValue: 1 << 1)
+}
+
 // swiftlint:disable:next type_body_length
 enum IconRenderer {
     private static let creditsCap: Double = 1000
@@ -767,6 +774,8 @@ enum IconRenderer {
         weeklyUsed: Double?,
         sessionUsed: Double?,
         mode: CodexMenuBarVisualizationMode,
+        invalidCharts: CodexPieRingInvalidCharts = [],
+        flashInvalidChartsAsUsed: Bool = false,
         stale: Bool,
         statusIndicator: ProviderStatusIndicator = .none) -> NSImage
     {
@@ -800,7 +809,15 @@ enum IconRenderer {
             trackFillColor.setFill()
             innerTrack.fill()
 
-            if innerUsed != nil, innerUnusedProgress > 0 {
+            if invalidCharts.contains(.pie) {
+                if flashInvalidChartsAsUsed {
+                    trackFillColor.setFill()
+                    innerTrack.fill()
+                } else {
+                    fillColor.setFill()
+                    innerTrack.fill()
+                }
+            } else if innerUsed != nil, innerUnusedProgress > 0 {
                 fillColor.setFill()
                 if innerUnusedProgress >= 0.999 {
                     innerTrack.fill()
@@ -842,20 +859,37 @@ enum IconRenderer {
             trackStrokeColor.setStroke()
             outerTrack.stroke()
 
-            if outerUsed != nil, outerUnusedProgress > 0 {
-                let startAngle: CGFloat = 90
-                let usedEndAngle = startAngle - (outerProgress * 360)
-                let outerArc = NSBezierPath()
-                outerArc.lineWidth = outerRingWidth
-                outerArc.lineCapStyle = .round
-                outerArc.appendArc(
-                    withCenter: center,
-                    radius: outerRadius,
-                    startAngle: usedEndAngle,
-                    endAngle: startAngle,
-                    clockwise: true)
+            if invalidCharts.contains(.ring) {
+                let fullOuterArc = NSBezierPath(ovalIn: ringRect)
+                fullOuterArc.lineWidth = outerRingWidth
+                fullOuterArc.lineCapStyle = .round
+                if flashInvalidChartsAsUsed {
+                    trackStrokeColor.setStroke()
+                } else {
+                    fillColor.setStroke()
+                }
+                fullOuterArc.stroke()
+            } else if outerUsed != nil, outerUnusedProgress > 0 {
                 fillColor.setStroke()
-                outerArc.stroke()
+                if outerUnusedProgress >= 0.999 {
+                    let fullOuterArc = NSBezierPath(ovalIn: ringRect)
+                    fullOuterArc.lineWidth = outerRingWidth
+                    fullOuterArc.lineCapStyle = .round
+                    fullOuterArc.stroke()
+                } else {
+                    let startAngle: CGFloat = 90
+                    let usedEndAngle = startAngle - (outerProgress * 360)
+                    let outerArc = NSBezierPath()
+                    outerArc.lineWidth = outerRingWidth
+                    outerArc.lineCapStyle = .round
+                    outerArc.appendArc(
+                        withCenter: center,
+                        radius: outerRadius,
+                        startAngle: usedEndAngle,
+                        endAngle: startAngle,
+                        clockwise: true)
+                    outerArc.stroke()
+                }
             }
 
             Self.drawStatusOverlay(indicator: statusIndicator)

@@ -45,6 +45,85 @@ extension StatusItemController {
         } else {
             self.stopBlinking()
         }
+
+        self.updateCodexPieRingInvalidFlashState()
+    }
+
+    private func normalizedPercentOrNil(_ value: Double?) -> Double? {
+        guard let value, value.isFinite else { return nil }
+        return max(0, min(value, 100))
+    }
+
+    private func isInvalidPercentValue(_ value: Double?) -> Bool {
+        guard let value else { return false }
+        return !value.isFinite
+    }
+
+    private func codexPieRingInvalidCharts(
+        mode: CodexMenuBarVisualizationMode,
+        weeklyUsed: Double?,
+        sessionUsed: Double?) -> CodexPieRingInvalidCharts
+    {
+        let weeklyInvalid = self.isInvalidPercentValue(weeklyUsed)
+        let sessionInvalid = self.isInvalidPercentValue(sessionUsed)
+        var charts: CodexPieRingInvalidCharts = []
+
+        if mode.placesWeeklyInOuterRing {
+            if sessionInvalid { charts.insert(.pie) }
+            if weeklyInvalid { charts.insert(.ring) }
+        } else {
+            if weeklyInvalid { charts.insert(.pie) }
+            if sessionInvalid { charts.insert(.ring) }
+        }
+
+        return charts
+    }
+
+    private func codexPieRingInvalidFlashUsesUsedColor(at date: Date = .init()) -> Bool {
+        Int(date.timeIntervalSince1970) % 2 == 0
+    }
+
+    private func shouldRunCodexPieRingInvalidFlashTicker(now: Date = .init()) -> Bool {
+        if self.needsMenuBarIconAnimation() { return false }
+        if self.settings.menuBarShowsBrandIconWithPercent { return false }
+        if !self.settings.codexMenuBarVisualizationMode.usesPieRingLayout { return false }
+
+        if self.shouldMergeIcons {
+            if self.primaryProviderForUnifiedIcon() != .codex { return false }
+        } else if !self.isVisible(.codex) {
+            return false
+        }
+
+        let snapshot = self.store.snapshot(for: .codex)
+        return self.isInvalidPercentValue(snapshot?.primary?.usedPercent) ||
+            self.isInvalidPercentValue(snapshot?.secondary?.usedPercent)
+    }
+
+    private func updateCodexPieRingInvalidFlashState(now: Date = .init()) {
+        let shouldRun = self.shouldRunCodexPieRingInvalidFlashTicker(now: now)
+        if shouldRun {
+            if self.codexPieRingInvalidFlashTask == nil {
+                self.codexPieRingInvalidFlashTask = Task { [weak self] in
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(1))
+                        await MainActor.run {
+                            guard let self else { return }
+                            self.updateCodexPieRingInvalidFlashState()
+                            guard self.shouldRunCodexPieRingInvalidFlashTicker() else { return }
+                            let phase: Double? = self.needsMenuBarIconAnimation() ? self.animationPhase : nil
+                            if self.shouldMergeIcons {
+                                self.applyIcon(phase: phase)
+                            } else {
+                                self.applyIcon(for: .codex, phase: phase)
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            self.codexPieRingInvalidFlashTask?.cancel()
+            self.codexPieRingInvalidFlashTask = nil
+        }
     }
 
     private func seedBlinkStatesIfNeeded() {
@@ -307,6 +386,7 @@ extension StatusItemController {
         if self.shouldUseCodexPieRingMenuBarIcon(provider: primaryProvider, showBrandPercent: showBrandPercent) {
             var weeklyUsed = snapshot?.secondary?.usedPercent
             var sessionUsed = snapshot?.primary?.usedPercent
+            let mode = self.settings.codexMenuBarVisualizationMode
             if let phase, needsAnimation {
                 let pattern = self.animationPattern
                 sessionUsed = max(pattern.value(phase: phase), Self.loadingPercentEpsilon)
@@ -314,12 +394,20 @@ extension StatusItemController {
                     pattern.value(phase: phase + pattern.secondaryOffset),
                     Self.loadingPercentEpsilon)
             }
+            let invalidCharts = self.codexPieRingInvalidCharts(
+                mode: mode,
+                weeklyUsed: weeklyUsed,
+                sessionUsed: sessionUsed)
+            weeklyUsed = self.normalizedPercentOrNil(weeklyUsed)
+            sessionUsed = self.normalizedPercentOrNil(sessionUsed)
 
             self.setButtonTitle(nil, for: button)
             let image = IconRenderer.makeCodexPieRingIcon(
                 weeklyUsed: weeklyUsed,
                 sessionUsed: sessionUsed,
-                mode: self.settings.codexMenuBarVisualizationMode,
+                mode: mode,
+                invalidCharts: invalidCharts,
+                flashInvalidChartsAsUsed: self.codexPieRingInvalidFlashUsesUsedColor(),
                 stale: stale,
                 statusIndicator: statusIndicator)
             self.setButtonImage(image, for: button)
@@ -378,6 +466,7 @@ extension StatusItemController {
         if self.shouldUseCodexPieRingMenuBarIcon(provider: provider, showBrandPercent: showBrandPercent) {
             var weeklyUsed = snapshot?.secondary?.usedPercent
             var sessionUsed = snapshot?.primary?.usedPercent
+            let mode = self.settings.codexMenuBarVisualizationMode
             if let phase, self.shouldAnimate(provider: provider) {
                 let pattern = self.animationPattern
                 sessionUsed = max(pattern.value(phase: phase), Self.loadingPercentEpsilon)
@@ -385,12 +474,20 @@ extension StatusItemController {
                     pattern.value(phase: phase + pattern.secondaryOffset),
                     Self.loadingPercentEpsilon)
             }
+            let invalidCharts = self.codexPieRingInvalidCharts(
+                mode: mode,
+                weeklyUsed: weeklyUsed,
+                sessionUsed: sessionUsed)
+            weeklyUsed = self.normalizedPercentOrNil(weeklyUsed)
+            sessionUsed = self.normalizedPercentOrNil(sessionUsed)
 
             self.setButtonTitle(nil, for: button)
             let image = IconRenderer.makeCodexPieRingIcon(
                 weeklyUsed: weeklyUsed,
                 sessionUsed: sessionUsed,
-                mode: self.settings.codexMenuBarVisualizationMode,
+                mode: mode,
+                invalidCharts: invalidCharts,
+                flashInvalidChartsAsUsed: self.codexPieRingInvalidFlashUsesUsedColor(),
                 stale: stale,
                 statusIndicator: self.store.statusIndicator(for: provider))
             self.setButtonImage(image, for: button)
@@ -712,4 +809,5 @@ extension StatusItemController {
         self.animationPhase = 0
         self.updateAnimationState()
     }
+
 }

@@ -795,8 +795,6 @@ enum IconRenderer {
             let outerUsed = mode.placesWeeklyInOuterRing ? weeklyUsed : sessionUsed
             let innerProgress = max(0, min((innerUsed ?? 0) / 100, 1))
             let outerProgress = max(0, min((outerUsed ?? 0) / 100, 1))
-            let innerUnusedProgress = 1 - innerProgress
-            let outerUnusedProgress = 1 - outerProgress
             let trackFillColor = baseFill.withAlphaComponent(trackFillAlpha)
             let trackStrokeColor = baseFill.withAlphaComponent(trackStrokeAlpha)
 
@@ -811,15 +809,15 @@ enum IconRenderer {
 
             if invalidCharts.contains(.pie) {
                 if flashInvalidChartsAsUsed {
-                    trackFillColor.setFill()
-                    innerTrack.fill()
-                } else {
                     fillColor.setFill()
                     innerTrack.fill()
+                } else {
+                    trackFillColor.setFill()
+                    innerTrack.fill()
                 }
-            } else if innerUsed != nil, innerUnusedProgress > 0 {
+            } else if innerUsed != nil, innerProgress > 0 {
                 fillColor.setFill()
-                if innerUnusedProgress >= 0.999 {
+                if innerProgress >= 0.999 {
                     innerTrack.fill()
                 } else {
                     let startAngle: CGFloat = 90
@@ -829,8 +827,8 @@ enum IconRenderer {
                     wedge.appendArc(
                         withCenter: center,
                         radius: innerPieRadius,
-                        startAngle: usedEndAngle,
-                        endAngle: startAngle,
+                        startAngle: startAngle,
+                        endAngle: usedEndAngle,
                         clockwise: true)
                     wedge.close()
                     wedge.fill()
@@ -864,14 +862,14 @@ enum IconRenderer {
                 fullOuterArc.lineWidth = outerRingWidth
                 fullOuterArc.lineCapStyle = .round
                 if flashInvalidChartsAsUsed {
-                    trackStrokeColor.setStroke()
-                } else {
                     fillColor.setStroke()
+                } else {
+                    trackStrokeColor.setStroke()
                 }
                 fullOuterArc.stroke()
-            } else if outerUsed != nil, outerUnusedProgress > 0 {
+            } else if outerUsed != nil, outerProgress > 0 {
                 fillColor.setStroke()
-                if outerUnusedProgress >= 0.999 {
+                if outerProgress >= 0.999 {
                     let fullOuterArc = NSBezierPath(ovalIn: ringRect)
                     fullOuterArc.lineWidth = outerRingWidth
                     fullOuterArc.lineCapStyle = .round
@@ -885,8 +883,8 @@ enum IconRenderer {
                     outerArc.appendArc(
                         withCenter: center,
                         radius: outerRadius,
-                        startAngle: usedEndAngle,
-                        endAngle: startAngle,
+                        startAngle: startAngle,
+                        endAngle: usedEndAngle,
                         clockwise: true)
                     outerArc.stroke()
                 }

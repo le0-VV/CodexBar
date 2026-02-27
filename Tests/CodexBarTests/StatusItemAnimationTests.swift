@@ -646,6 +646,11 @@ struct StatusItemAnimationTests {
             sessionUsed: 0,
             mode: .pieRing,
             stale: false)
+        let tinyUsage = IconRenderer.makeCodexPieRingIcon(
+            weeklyUsed: 1,
+            sessionUsed: 1,
+            mode: .pieRing,
+            stale: false)
         let swappedUsage = IconRenderer.makeCodexPieRingIcon(
             weeklyUsed: 25,
             sessionUsed: 25,
@@ -675,6 +680,9 @@ struct StatusItemAnimationTests {
         let zeroRep = zeroUsage.representations.compactMap { $0 as? NSBitmapImageRep }.first(where: {
             $0.pixelsWide == 36 && $0.pixelsHigh == 36
         })
+        let tinyRep = tinyUsage.representations.compactMap { $0 as? NSBitmapImageRep }.first(where: {
+            $0.pixelsWide == 36 && $0.pixelsHigh == 36
+        })
         let swappedRep = swappedUsage.representations.compactMap { $0 as? NSBitmapImageRep }.first(where: {
             $0.pixelsWide == 36 && $0.pixelsHigh == 36
         })
@@ -690,19 +698,22 @@ struct StatusItemAnimationTests {
         #expect(partialRep != nil)
         #expect(fullRep != nil)
         #expect(zeroRep != nil)
+        #expect(tinyRep != nil)
         #expect(swappedRep != nil)
         #expect(invalidRingAvailableRep != nil)
         #expect(invalidRingUsedRep != nil)
 
-        if let zeroRep, let fullRep {
+        if let zeroRep, let tinyRep, let fullRep {
             let zeroOuterAlpha = self.averageAlpha(in: zeroRep, points: self.outerRingSamplePoints)
+            let tinyOuterAlpha = self.averageAlpha(in: tinyRep, points: self.outerRingSamplePoints)
             let fullOuterAlpha = self.averageAlpha(in: fullRep, points: self.outerRingSamplePoints)
-            #expect(zeroOuterAlpha > fullOuterAlpha + 0.06)
+            #expect(fullOuterAlpha > zeroOuterAlpha + 0.06)
+            #expect(tinyOuterAlpha < zeroOuterAlpha + (fullOuterAlpha - zeroOuterAlpha) * 0.4)
         }
         if let invalidRingAvailableRep, let invalidRingUsedRep {
             let availableOuterAlpha = self.averageAlpha(in: invalidRingAvailableRep, points: self.outerRingSamplePoints)
             let usedOuterAlpha = self.averageAlpha(in: invalidRingUsedRep, points: self.outerRingSamplePoints)
-            #expect(availableOuterAlpha > usedOuterAlpha + 0.06)
+            #expect(usedOuterAlpha > availableOuterAlpha + 0.06)
         }
     }
 

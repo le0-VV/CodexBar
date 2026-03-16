@@ -1,6 +1,6 @@
 import Foundation
 
-struct SettingsDefaultsState: Sendable {
+struct SettingsDefaultsState {
     var refreshFrequency: RefreshFrequency
     var launchAtLogin: Bool
     var debugMenuEnabled: Bool
@@ -16,6 +16,7 @@ struct SettingsDefaultsState: Sendable {
     var menuBarShowsBrandIconWithPercent: Bool
     var menuBarDisplayModeRaw: String?
     var codexMenuBarVisualizationModeRaw: String?
+    var historicalTrackingEnabled: Bool
     var showAllTokenAccountsInMenu: Bool
     var menuBarMetricPreferencesRaw: [String: String]
     var costUsageEnabled: Bool

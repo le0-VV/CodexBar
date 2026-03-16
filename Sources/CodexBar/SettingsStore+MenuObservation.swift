@@ -17,6 +17,7 @@ extension SettingsStore {
         _ = self.menuBarShowsHighestUsage
         _ = self.menuBarDisplayMode
         _ = self.codexMenuBarVisualizationMode
+        _ = self.historicalTrackingEnabled
         _ = self.showAllTokenAccountsInMenu
         _ = self.menuBarMetricPreferencesRaw
         _ = self.costUsageEnabled
@@ -29,6 +30,8 @@ extension SettingsStore {
         _ = self.openAIWebAccessEnabled
         _ = self.codexUsageDataSource
         _ = self.claudeUsageDataSource
+        _ = self.kiloUsageDataSource
+        _ = self.kiloExtrasEnabled
         _ = self.codexCookieSource
         _ = self.claudeCookieSource
         _ = self.cursorCookieSource
@@ -56,6 +59,7 @@ extension SettingsStore {
         _ = self.minimaxAPIToken
         _ = self.kimiManualCookieHeader
         _ = self.kimiK2APIToken
+        _ = self.kiloAPIToken
         _ = self.augmentCookieHeader
         _ = self.ampCookieHeader
         _ = self.ollamaCookieHeader

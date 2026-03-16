@@ -30,6 +30,7 @@ extension UsageStore {
         _ = self.pathDebugInfo
         _ = self.statuses
         _ = self.probeLogs
+        _ = self.historicalPaceRevision
         return 0
     }
 
@@ -51,94 +52,48 @@ extension UsageStore {
             _ = self.settings.selectedMenuProvider
             _ = self.settings.debugLoadingPattern
             _ = self.settings.debugKeepCLISessionsAlive
+            _ = self.settings.historicalTrackingEnabled
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.observeSettingsChanges()
+                guard self.startupBehavior.automaticallyStartsBackgroundWork else { return }
                 self.startTimer()
                 self.updateProviderRuntimes()
+                await self.refreshHistoricalDatasetIfNeeded()
                 await self.refresh()
             }
         }
     }
 }
 
-enum ProviderStatusIndicator: String {
-    case none
-    case minor
-    case major
-    case critical
-    case maintenance
-    case unknown
-
-    var hasIssue: Bool {
-        switch self {
-        case .none: false
-        default: true
-        }
-    }
-
-    var label: String {
-        switch self {
-        case .none: "Operational"
-        case .minor: "Partial outage"
-        case .major: "Major outage"
-        case .critical: "Critical issue"
-        case .maintenance: "Maintenance"
-        case .unknown: "Status unknown"
-        }
-    }
-}
-
-#if DEBUG
-extension UsageStore {
-    func _setSnapshotForTesting(_ snapshot: UsageSnapshot?, provider: UsageProvider) {
-        self.snapshots[provider] = snapshot?.scoped(to: provider)
-    }
-
-    func _setTokenSnapshotForTesting(_ snapshot: CostUsageTokenSnapshot?, provider: UsageProvider) {
-        self.tokenSnapshots[provider] = snapshot
-    }
-
-    func _setTokenErrorForTesting(_ error: String?, provider: UsageProvider) {
-        self.tokenErrors[provider] = error
-    }
-
-    func _setErrorForTesting(_ error: String?, provider: UsageProvider) {
-        self.errors[provider] = error
-    }
-}
-#endif
-
-struct ProviderStatus {
-    let indicator: ProviderStatusIndicator
-    let description: String?
-    let updatedAt: Date?
-}
-
-/// Tracks consecutive failures so we can ignore a single flake when we previously had fresh data.
-struct ConsecutiveFailureGate {
-    private(set) var streak: Int = 0
-
-    mutating func recordSuccess() {
-        self.streak = 0
-    }
-
-    mutating func reset() {
-        self.streak = 0
-    }
-
-    /// Returns true when the caller should surface the error to the UI.
-    mutating func shouldSurfaceError(onFailureWithPriorData hadPriorData: Bool) -> Bool {
-        self.streak += 1
-        if hadPriorData, self.streak == 1 { return false }
-        return true
-    }
-}
-
 @MainActor
 @Observable
 final class UsageStore {
+    enum StartupBehavior {
+        case automatic
+        case full
+        case testing
+
+        var automaticallyStartsBackgroundWork: Bool {
+            switch self {
+            case .automatic, .full:
+                true
+            case .testing:
+                false
+            }
+        }
+
+        func resolved(isRunningTests: Bool) -> StartupBehavior {
+            switch self {
+            case .automatic:
+                isRunningTests ? .testing : .full
+            case .full, .testing:
+                self
+            }
+        }
+    }
+
     var snapshots: [UsageProvider: UsageSnapshot] = [:]
     var errors: [UsageProvider: String] = [:]
     var lastSourceLabels: [UsageProvider: String] = [:]
@@ -161,6 +116,7 @@ final class UsageStore {
     var pathDebugInfo: PathDebugSnapshot = .empty
     var statuses: [UsageProvider: ProviderStatus] = [:]
     var probeLogs: [UsageProvider: String] = [:]
+    var historicalPaceRevision: Int = 0
     @ObservationIgnored private var lastCreditsSnapshot: CreditsSnapshot?
     @ObservationIgnored private var creditsFailureStreak: Int = 0
     @ObservationIgnored private var lastOpenAIDashboardSnapshot: OpenAIDashboardSnapshot?
@@ -175,7 +131,7 @@ final class UsageStore {
     @ObservationIgnored let browserDetection: BrowserDetection
     @ObservationIgnored private let registry: ProviderRegistry
     @ObservationIgnored let settings: SettingsStore
-    @ObservationIgnored private let sessionQuotaNotifier: SessionQuotaNotifier
+    @ObservationIgnored private let sessionQuotaNotifier: any SessionQuotaNotifying
     @ObservationIgnored private let sessionQuotaLogger = CodexBarLog.logger(LogCategories.sessionQuota)
     @ObservationIgnored private let openAIWebLogger = CodexBarLog.logger(LogCategories.openAIWeb)
     @ObservationIgnored private let tokenCostLogger = CodexBarLog.logger(LogCategories.tokenCost)
@@ -191,11 +147,16 @@ final class UsageStore {
     @ObservationIgnored private var tokenTimerTask: Task<Void, Never>?
     @ObservationIgnored private var tokenRefreshSequenceTask: Task<Void, Never>?
     @ObservationIgnored private var pathDebugRefreshTask: Task<Void, Never>?
+    @ObservationIgnored let historicalUsageHistoryStore: HistoricalUsageHistoryStore
+    @ObservationIgnored var codexHistoricalDataset: CodexHistoricalDataset?
+    @ObservationIgnored var codexHistoricalDatasetAccountKey: String?
     @ObservationIgnored var lastKnownSessionRemaining: [UsageProvider: Double] = [:]
+    @ObservationIgnored var lastKnownSessionWindowSource: [UsageProvider: SessionQuotaWindowSource] = [:]
     @ObservationIgnored var lastTokenFetchAt: [UsageProvider: Date] = [:]
     @ObservationIgnored private var hasCompletedInitialRefresh: Bool = false
     @ObservationIgnored private let tokenFetchTTL: TimeInterval = 60 * 60
     @ObservationIgnored private let tokenFetchTimeout: TimeInterval = 10 * 60
+    @ObservationIgnored private let startupBehavior: StartupBehavior
 
     init(
         fetcher: UsageFetcher,
@@ -204,7 +165,9 @@ final class UsageStore {
         costUsageFetcher: CostUsageFetcher = CostUsageFetcher(),
         settings: SettingsStore,
         registry: ProviderRegistry = .shared,
-        sessionQuotaNotifier: SessionQuotaNotifier = SessionQuotaNotifier())
+        historicalUsageHistoryStore: HistoricalUsageHistoryStore = HistoricalUsageHistoryStore(),
+        sessionQuotaNotifier: any SessionQuotaNotifying = SessionQuotaNotifier(),
+        startupBehavior: StartupBehavior = .automatic)
     {
         self.codexFetcher = fetcher
         self.browserDetection = browserDetection
@@ -212,7 +175,9 @@ final class UsageStore {
         self.costUsageFetcher = costUsageFetcher
         self.settings = settings
         self.registry = registry
+        self.historicalUsageHistoryStore = historicalUsageHistoryStore
         self.sessionQuotaNotifier = sessionQuotaNotifier
+        self.startupBehavior = startupBehavior.resolved(isRunningTests: Self.isRunningTestsProcess())
         self.providerMetadata = registry.metadata
         self
             .failureGates = Dictionary(
@@ -232,14 +197,15 @@ final class UsageStore {
         })
         self.logStartupState()
         self.bindSettings()
-        self.detectVersions()
-        self.updateProviderRuntimes()
         self.pathDebugInfo = PathDebugSnapshot(
             codexBinary: nil,
             claudeBinary: nil,
             geminiBinary: nil,
             effectivePATH: PathBuilder.effectivePATH(purposes: [.rpc, .tty, .nodeTooling]),
             loginShellPATH: LoginShellPathCache.shared.current?.joined(separator: ":"))
+        guard self.startupBehavior.automaticallyStartsBackgroundWork else { return }
+        self.detectVersions()
+        self.updateProviderRuntimes()
         Task { @MainActor [weak self] in
             self?.schedulePathDebugInfoRefresh()
         }
@@ -248,9 +214,22 @@ final class UsageStore {
                 self?.schedulePathDebugInfoRefresh()
             }
         }
+        Task { @MainActor [weak self] in
+            await self?.refreshHistoricalDatasetIfNeeded()
+        }
         Task { await self.refresh() }
         self.startTimer()
         self.startTokenTimer()
+    }
+
+    private static func isRunningTestsProcess() -> Bool {
+        let environment = ProcessInfo.processInfo.environment
+        if environment["XCTestConfigurationFilePath"] != nil { return true }
+        if environment["XCTestSessionIdentifier"] != nil { return true }
+        if environment["SWIFT_TESTING_ENABLED"] != nil { return true }
+        return CommandLine.arguments.contains { argument in
+            argument.contains("xctest") || argument.contains("swift-testing")
+        }
     }
 
     /// Returns the login method (plan type) for the specified provider, if available.
@@ -307,27 +286,9 @@ final class UsageStore {
         return enabled.filter { self.isProviderAvailable($0) }
     }
 
-    /// Returns the enabled provider with the highest usage percentage (closest to rate limit).
-    /// Excludes providers already at 100% since they're fully rate-limited.
-    func providerWithHighestUsage() -> (provider: UsageProvider, usedPercent: Double)? {
-        var highest: (provider: UsageProvider, usedPercent: Double)?
-        for provider in self.enabledProviders() {
-            guard let snapshot = self.snapshots[provider] else { continue }
-            // Use the same window selection logic as menuBarPercentWindow:
-            // Factory and Kimi use secondary first, others use primary first.
-            let window: RateWindow? = if provider == .factory || provider == .kimi {
-                snapshot.secondary ?? snapshot.primary
-            } else {
-                snapshot.primary ?? snapshot.secondary
-            }
-            let percent = window?.usedPercent ?? 0
-            // Skip providers already at 100% - they're fully rate-limited
-            guard percent < 100 else { continue }
-            if highest == nil || percent > highest!.usedPercent {
-                highest = (provider, percent)
-            }
-        }
-        return highest
+    /// Enabled providers without availability filtering. Used for display (switcher, merge-icons).
+    func enabledProvidersForDisplay() -> [UsageProvider] {
+        self.settings.enabledProvidersOrdered(metadataByProvider: self.providerMetadata)
     }
 
     var statusChecksEnabled: Bool {
@@ -538,12 +499,51 @@ final class UsageStore {
         self.tokenRefreshSequenceTask?.cancel()
     }
 
-    func handleSessionQuotaTransition(provider: UsageProvider, snapshot: UsageSnapshot) {
-        guard let primary = snapshot.primary else { return }
-        let currentRemaining = primary.remainingPercent
-        let previousRemaining = self.lastKnownSessionRemaining[provider]
+    enum SessionQuotaWindowSource: String {
+        case primary
+        case copilotSecondaryFallback
+    }
 
-        defer { self.lastKnownSessionRemaining[provider] = currentRemaining }
+    private func sessionQuotaWindow(
+        provider: UsageProvider,
+        snapshot: UsageSnapshot) -> (window: RateWindow, source: SessionQuotaWindowSource)?
+    {
+        if let primary = snapshot.primary {
+            return (primary, .primary)
+        }
+        if provider == .copilot, let secondary = snapshot.secondary {
+            return (secondary, .copilotSecondaryFallback)
+        }
+        return nil
+    }
+
+    func handleSessionQuotaTransition(provider: UsageProvider, snapshot: UsageSnapshot) {
+        // Session quota notifications are tied to the primary session window. Copilot free plans can
+        // expose only chat quota, so allow Copilot to fall back to secondary for transition tracking.
+        guard let sessionWindow = self.sessionQuotaWindow(provider: provider, snapshot: snapshot) else {
+            self.lastKnownSessionRemaining.removeValue(forKey: provider)
+            self.lastKnownSessionWindowSource.removeValue(forKey: provider)
+            return
+        }
+        let currentRemaining = sessionWindow.window.remainingPercent
+        let currentSource = sessionWindow.source
+        let previousRemaining = self.lastKnownSessionRemaining[provider]
+        let previousSource = self.lastKnownSessionWindowSource[provider]
+
+        if let previousSource, previousSource != currentSource {
+            let providerText = provider.rawValue
+            self.sessionQuotaLogger.debug(
+                "session window source changed: provider=\(providerText) prevSource=\(previousSource.rawValue) " +
+                    "currSource=\(currentSource.rawValue) curr=\(currentRemaining)")
+            self.lastKnownSessionRemaining[provider] = currentRemaining
+            self.lastKnownSessionWindowSource[provider] = currentSource
+            return
+        }
+
+        defer {
+            self.lastKnownSessionRemaining[provider] = currentRemaining
+            self.lastKnownSessionWindowSource[provider] = currentSource
+        }
 
         guard self.settings.sessionQuotaNotificationsEnabled else {
             if SessionQuotaNotificationLogic.isDepleted(currentRemaining) ||
@@ -563,7 +563,7 @@ final class UsageStore {
                 let providerText = provider.rawValue
                 let message = "startup depleted: provider=\(providerText) curr=\(currentRemaining)"
                 self.sessionQuotaLogger.info(message)
-                self.sessionQuotaNotifier.post(transition: .depleted, provider: provider)
+                self.sessionQuotaNotifier.post(transition: .depleted, provider: provider, badge: nil)
             }
             return
         }
@@ -591,7 +591,7 @@ final class UsageStore {
             "prev=\(previousRemaining ?? -1) curr=\(currentRemaining)"
         self.sessionQuotaLogger.info(message)
 
-        self.sessionQuotaNotifier.post(transition: transition, provider: provider)
+        self.sessionQuotaNotifier.post(transition: transition, provider: provider, badge: nil)
     }
 
     private func refreshStatus(_ provider: UsageProvider) async {
@@ -710,6 +710,7 @@ extension UsageStore {
         if let email = targetEmail, !email.isEmpty {
             OpenAIDashboardCacheStore.save(OpenAIDashboardCache(accountEmail: email, snapshot: dash))
         }
+        self.backfillCodexHistoricalFromDashboardIfNeeded(dash)
     }
 
     private func applyOpenAIDashboardFailure(message: String) async {
@@ -1177,6 +1178,7 @@ extension UsageStore {
                 .factory: "Droid debug log not yet implemented",
                 .copilot: "Copilot debug log not yet implemented",
                 .vertexai: "Vertex AI debug log not yet implemented",
+                .kilo: "Kilo debug log not yet implemented",
                 .kiro: "Kiro debug log not yet implemented",
                 .kimi: "Kimi debug log not yet implemented",
                 .kimik2: "Kimi K2 debug log not yet implemented",
@@ -1243,7 +1245,8 @@ extension UsageStore {
                 let hasAny = resolution != nil
                 let source = resolution?.source.rawValue ?? "none"
                 text = "WARP_API_KEY=\(hasAny ? "present" : "missing") source=\(source)"
-            case .gemini, .antigravity, .opencode, .factory, .copilot, .vertexai, .kiro, .kimi, .kimik2, .jetbrains:
+            case .gemini, .antigravity, .opencode, .factory, .copilot, .vertexai, .kilo, .kiro, .kimi, .kimik2,
+                 .jetbrains:
                 text = unimplementedDebugLogMessages[provider] ?? "Debug log not yet implemented"
             }
 

@@ -440,8 +440,8 @@ extension StatusItemController {
         }
 
         if self.shouldUseCodexPieRingMenuBarIcon(provider: primaryProvider, showBrandPercent: showBrandPercent) {
-            var weeklyUsed = showUsed ? snapshot?.secondary?.usedPercent : snapshot?.secondary?.remainingPercent
-            var sessionUsed = showUsed ? snapshot?.primary?.usedPercent : snapshot?.primary?.remainingPercent
+            var weeklyUsed = resolved?.secondary
+            var sessionUsed = resolved?.primary
             let mode = self.settings.codexMenuBarVisualizationMode
             if let phase, needsAnimation {
                 let pattern = self.animationPattern
@@ -467,7 +467,7 @@ extension StatusItemController {
                 stale: stale,
                 statusIndicator: statusIndicator)
             self.setButtonImage(image, for: button)
-            return
+            return false
         }
 
         self.setButtonTitle(nil, for: button)
@@ -540,6 +540,13 @@ extension StatusItemController {
         let showUsed = self.settings.usageBarsShowUsed
         let showBrandPercent = self.settings.menuBarShowsBrandIconWithPercent
         let style: IconStyle = self.store.style(for: provider)
+        let resolved = snapshot.map {
+            IconRemainingResolver.resolvedPercents(
+                snapshot: $0,
+                style: style,
+                showUsed: showUsed)
+        }
+        var stale = self.store.isStale(provider: provider)
 
         if showBrandPercent,
            let brand = ProviderBrandIcon.image(for: provider)
@@ -563,14 +570,8 @@ extension StatusItemController {
         }
 
         if self.shouldUseCodexPieRingMenuBarIcon(provider: provider, showBrandPercent: showBrandPercent) {
-            var weeklyUsed = IconRemainingResolver.resolvedPercent(
-                snapshot?.secondary,
-                style: style,
-                showUsed: showUsed)
-            var sessionUsed = IconRemainingResolver.resolvedPercent(
-                snapshot?.primary,
-                style: style,
-                showUsed: showUsed)
+            var weeklyUsed = resolved?.secondary
+            var sessionUsed = resolved?.primary
             let mode = self.settings.codexMenuBarVisualizationMode
             if let phase, self.shouldAnimate(provider: provider) {
                 let pattern = self.animationPattern
@@ -597,12 +598,6 @@ extension StatusItemController {
                 statusIndicator: self.store.statusIndicator(for: provider))
             self.setButtonImage(image, for: button)
             return
-        }
-        let resolved = snapshot.map {
-            IconRemainingResolver.resolvedPercents(
-                snapshot: $0,
-                style: style,
-                showUsed: showUsed)
         }
         var primary = resolved?.primary
         var weekly = resolved?.secondary
@@ -633,7 +628,6 @@ extension StatusItemController {
                 snapshotOverride: snapshot,
                 now: snapshot?.updatedAt ?? Date())
             : nil
-        var stale = self.store.isStale(provider: provider)
         var morphProgress: Double?
 
         if let phase, self.shouldAnimate(provider: provider) {

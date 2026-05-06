@@ -274,6 +274,14 @@ extension SettingsStore {
         }
     }
 
+    var claudePeakHoursEnabled: Bool {
+        get { self.defaultsState.claudePeakHoursEnabled }
+        set {
+            self.defaultsState.claudePeakHoursEnabled = newValue
+            self.userDefaults.set(newValue, forKey: "claudePeakHoursEnabled")
+        }
+    }
+
     var showOptionalCreditsAndExtraUsage: Bool {
         get { self.defaultsState.showOptionalCreditsAndExtraUsage }
         set {
@@ -300,6 +308,17 @@ extension SettingsStore {
             self.userDefaults.set(newValue, forKey: "openAIWebBatterySaverEnabled")
             CodexBarLog.logger(LogCategories.settings).info(
                 "OpenAI web battery saver updated",
+                metadata: ["enabled": newValue ? "1" : "0"])
+        }
+    }
+
+    var providerStorageFootprintsEnabled: Bool {
+        get { self.defaultsState.providerStorageFootprintsEnabled }
+        set {
+            self.defaultsState.providerStorageFootprintsEnabled = newValue
+            self.userDefaults.set(newValue, forKey: "providerStorageFootprintsEnabled")
+            CodexBarLog.logger(LogCategories.settings).info(
+                "Provider storage footprints updated",
                 metadata: ["enabled": newValue ? "1" : "0"])
         }
     }

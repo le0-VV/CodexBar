@@ -1,0 +1,287 @@
+name: Auto Sync Upstream
+
+on:
+  schedule:
+    # Scheduled workflows run in UTC and only from the default branch.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: "Fork branch to update"
+        required: true
+        default: "main"
+      upstream_repository:
+        description: "Upstream owner/repository"
+        required: true
+        default: "steipete/CodexBar"
+      upstream_branch:
+        description: "Upstream branch to merge"
+        required: true
+        default: "main"
+      mode:
+        description: "How to apply a clean upstream merge"
+        required: true
+        default: "push"
+        type: choice
+        options:
+          - push
+          - pull-request
+
+concurrency:
+  group: auto-sync-upstream-${{ github.event_name == 'workflow_dispatch' && inputs.target_branch || 'main' }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    env:
+      TARGET_BRANCH: ${{ github.event_name == 'workflow_dispatch' && inputs.target_branch || 'main' }}
+      UPSTREAM_REPOSITORY: ${{ github.event_name == 'workflow_dispatch' && inputs.upstream_repository || 'steipete/CodexBar' }}
+      UPSTREAM_BRANCH: ${{ github.event_name == 'workflow_dispatch' && inputs.upstream_branch || 'main' }}
+      SYNC_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'push' }}
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.FORK_SYNC_TOKEN || github.token }}
+
+      - name: Validate sync inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$TARGET_BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "Invalid target branch: $TARGET_BRANCH" >&2
+            exit 1
+          fi
+          if [[ ! "$UPSTREAM_BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "Invalid upstream branch: $UPSTREAM_BRANCH" >&2
+            exit 1
+          fi
+          if [[ ! "$UPSTREAM_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+            echo "Invalid upstream repository: $UPSTREAM_REPOSITORY" >&2
+            exit 1
+          fi
+          if [[ "$SYNC_MODE" != "push" && "$SYNC_MODE" != "pull-request" ]]; then
+            echo "Invalid sync mode: $SYNC_MODE" >&2
+            exit 1
+          fi
+
+      - name: Configure git
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch fork target and upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
+          git fetch --no-tags origin "+refs/heads/${TARGET_BRANCH}:refs/remotes/origin/${TARGET_BRANCH}"
+          git fetch --no-tags upstream "+refs/heads/${UPSTREAM_BRANCH}:refs/remotes/upstream/${UPSTREAM_BRANCH}"
+
+      - name: Merge upstream
+        id: merge
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          upstream_ref="upstream/${UPSTREAM_BRANCH}"
+          target_ref="origin/${TARGET_BRANCH}"
+          upstream_sha="$(git rev-parse "$upstream_ref")"
+          upstream_short="$(git rev-parse --short "$upstream_ref")"
+          sync_branch="codex/auto-upstream-sync-${upstream_short}"
+
+          {
+            echo "upstream_sha=${upstream_sha}"
+            echo "upstream_short=${upstream_short}"
+            echo "sync_branch=${sync_branch}"
+            echo "upstream_summary<<EOF"
+            git log --oneline --no-merges "${target_ref}..${upstream_ref}" | head -20
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          if git merge-base --is-ancestor "$upstream_ref" "$target_ref"; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "Target branch already contains ${upstream_ref}."
+            exit 0
+          fi
+
+          git checkout -B "$sync_branch" "$target_ref"
+
+          set +e
+          git merge --no-ff --no-edit "$upstream_ref"
+          merge_status=$?
+          set -e
+
+          if [[ "$merge_status" -ne 0 ]]; then
+            {
+              echo "has_changes=true"
+              echo "conflict=true"
+              echo "conflict_files<<EOF"
+              git diff --name-only --diff-filter=U
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          echo "conflict=false" >> "$GITHUB_OUTPUT"
+
+          if [[ "$SYNC_MODE" == "push" ]]; then
+            if git push origin "HEAD:${TARGET_BRANCH}"; then
+              echo "pushed=true" >> "$GITHUB_OUTPUT"
+              echo "pr_needed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Direct push failed; falling back to pull request mode."
+          fi
+
+          git push --force-with-lease origin "HEAD:${sync_branch}"
+          echo "pushed=false" >> "$GITHUB_OUTPUT"
+          echo "pr_needed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update sync pull request
+        if: steps.merge.outputs.pr_needed == 'true'
+        uses: actions/github-script@v8
+        env:
+          TARGET_BRANCH: ${{ env.TARGET_BRANCH }}
+          UPSTREAM_REPOSITORY: ${{ env.UPSTREAM_REPOSITORY }}
+          UPSTREAM_BRANCH: ${{ env.UPSTREAM_BRANCH }}
+          UPSTREAM_SHA: ${{ steps.merge.outputs.upstream_sha }}
+          SYNC_BRANCH: ${{ steps.merge.outputs.sync_branch }}
+          UPSTREAM_SUMMARY: ${{ steps.merge.outputs.upstream_summary }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const targetBranch = process.env.TARGET_BRANCH;
+            const syncBranch = process.env.SYNC_BRANCH;
+            const head = `${owner}:${syncBranch}`;
+            const title = `Sync ${process.env.UPSTREAM_REPOSITORY}:${process.env.UPSTREAM_BRANCH} into ${targetBranch}`;
+            const body = [
+              `Automatic upstream sync for \`${process.env.UPSTREAM_REPOSITORY}:${process.env.UPSTREAM_BRANCH}\`.`,
+              "",
+              `Upstream head: \`${process.env.UPSTREAM_SHA}\``,
+              "",
+              "Recent upstream commits:",
+              "```",
+              process.env.UPSTREAM_SUMMARY || "No non-merge commits listed.",
+              "```",
+              "",
+              "This PR was created because direct push mode was disabled or unavailable."
+            ].join("\n");
+
+            const existing = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: "open",
+              head,
+              base: targetBranch
+            });
+
+            if (existing.data.length > 0) {
+              await github.rest.pulls.update({
+                owner,
+                repo,
+                pull_number: existing.data[0].number,
+                title,
+                body
+              });
+              core.notice(`Updated PR #${existing.data[0].number}`);
+            } else {
+              const created = await github.rest.pulls.create({
+                owner,
+                repo,
+                title,
+                head: syncBranch,
+                base: targetBranch,
+                body
+              });
+              core.notice(`Created PR #${created.data.number}`);
+            }
+
+      - name: Create or update conflict issue
+        if: steps.merge.outputs.conflict == 'true'
+        uses: actions/github-script@v8
+        env:
+          TARGET_BRANCH: ${{ env.TARGET_BRANCH }}
+          UPSTREAM_REPOSITORY: ${{ env.UPSTREAM_REPOSITORY }}
+          UPSTREAM_BRANCH: ${{ env.UPSTREAM_BRANCH }}
+          UPSTREAM_SHA: ${{ steps.merge.outputs.upstream_sha }}
+          CONFLICT_FILES: ${{ steps.merge.outputs.conflict_files }}
+          UPSTREAM_SUMMARY: ${{ steps.merge.outputs.upstream_summary }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const title = `Automatic upstream sync conflict: ${process.env.UPSTREAM_REPOSITORY}:${process.env.UPSTREAM_BRANCH}`;
+            const body = [
+              `Automatic upstream sync could not merge into \`${process.env.TARGET_BRANCH}\`.`,
+              "",
+              `Upstream head: \`${process.env.UPSTREAM_SHA}\``,
+              "",
+              "Conflicted files:",
+              "```",
+              process.env.CONFLICT_FILES || "No conflict file list was produced.",
+              "```",
+              "",
+              "Recent upstream commits:",
+              "```",
+              process.env.UPSTREAM_SUMMARY || "No non-merge commits listed.",
+              "```",
+              "",
+              "Resolve manually by fetching upstream and merging locally."
+            ].join("\n");
+
+            const issues = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: "open",
+              per_page: 100
+            });
+            const existing = issues.data.find((issue) => issue.title === title && !issue.pull_request);
+
+            if (existing) {
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number: existing.number,
+                body
+              });
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: existing.number,
+                body: `Conflict still present at upstream head \`${process.env.UPSTREAM_SHA}\`.`
+              });
+              core.notice(`Updated issue #${existing.number}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner,
+                repo,
+                title,
+                body
+              });
+              core.notice(`Created issue #${created.data.number}`);
+            }
+
+      - name: Fail when manual conflict resolution is required
+        if: steps.merge.outputs.conflict == 'true'
+        shell: bash
+        run: |
+          echo "Automatic upstream merge has conflicts. See the generated issue for details." >&2
+          exit 1
+
+      - name: Report no upstream changes
+        if: steps.merge.outputs.has_changes == 'false'
+        shell: bash
+        run: echo "No upstream changes to sync."

@@ -1,8 +1,25 @@
-# CodexBar 🎚️ - May your tokens never run out.
+# CodexBar 🎚️ — May your tokens never run out.
 
-Tiny macOS 14+ menu bar app that keeps AI coding-provider limits visible and shows when each window resets. CodexBar supports Codex, Claude, Cursor, Gemini, Copilot, z.ai, Kiro, Vertex AI, Augment, OpenRouter, Codebuff, and many newer coding providers. One status item per provider (or Merge Icons mode with a provider switcher); enable what you use from Settings. No Dock icon, minimal UI, dynamic bar icons in the menu bar.
+> Every AI coding limit, in your menu bar.
 
-<img src="codexbar.png" alt="CodexBar menu screenshot" width="520" />
+[![Latest release](https://img.shields.io/github/v/release/steipete/CodexBar?style=flat-square&color=0a0a0c)](https://github.com/steipete/CodexBar/releases/latest)
+[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-0a0a0c?style=flat-square)](https://github.com/steipete/CodexBar/releases/latest)
+[![Homebrew](https://img.shields.io/badge/brew-steipete%2Ftap%2Fcodexbar-orange?style=flat-square)](https://github.com/steipete/homebrew-tap)
+[![License: MIT](https://img.shields.io/badge/license-MIT-6e5aff?style=flat-square)](LICENSE)
+[![Site](https://img.shields.io/badge/site-codexbar.app-16d3b4?style=flat-square)](https://codexbar.app)
+
+<a href="https://codexbar.app"><img src="docs/social.png" alt="CodexBar — every AI coding limit in your menu bar. 29 providers." width="100%" /></a>
+
+Tiny macOS 14+ menu bar app that keeps **AI coding-provider limits visible** and shows when each window resets. Codex, Claude, Cursor, Gemini, Copilot, z.ai, Kiro, Vertex AI, Augment, OpenRouter, Codebuff, Command Code, and many newer coding providers. One status item per provider, or Merge Icons mode with a provider switcher. No Dock icon, minimal UI, dynamic bar icons.
+
+<img src="codexbar.png" alt="CodexBar menu popover with provider tiles, usage bars, and reset countdowns" width="520" />
+
+## Why
+
+- **Plan around resets.** Per-provider session, weekly, and monthly windows with countdowns to the next reset — stop guessing whether to start that long task.
+- **Credits, spend, and cost scans.** Credit balances and monthly spend where the provider exposes them, plus a local cost scan over the last 30 days for Codex and Claude.
+- **Live status.** Provider status polling surfaces incident badges in the menu and an indicator overlay on the bar icon.
+- **Privacy-first.** Reuses existing provider sessions — OAuth, device flow, API keys, browser cookies, local files — so no passwords are stored.
 
 ## Install
 
@@ -31,6 +48,24 @@ Or download release tarballs from GitHub Releases:
 - Install/sign in to the provider sources you rely on: CLIs, browser sessions, OAuth/device flow, API keys, local app files, or provider apps depending on the provider.
 - Optional: Settings → Providers → Codex → OpenAI cookies (Automatic or Manual) to add dashboard extras.
 
+### Set API keys from the CLI
+Provider toggles and API keys live in `~/.codexbar/config.json`. You can script the same provider list that Settings → Providers uses:
+
+```bash
+codexbar config providers
+codexbar config enable --provider grok
+codexbar config disable --provider cursor
+```
+
+For API-key providers, store a key without opening Settings:
+
+```bash
+printf '%s' "$ELEVENLABS_API_KEY" | codexbar config set-api-key --provider elevenlabs --stdin
+```
+
+`set-api-key` trims the piped value, stores it with restrictive config-file permissions, and enables the provider by default. Use `--no-enable` to only save the key, or `--api-key <key>` for one-off local scripts where shell history is not a concern.
+See [CLI configuration](docs/cli-configuration.md) for the full flow.
+
 ## Providers
 
 - [Codex](docs/codex.md) — OAuth API or local Codex CLI, plus optional OpenAI web dashboard extras.
@@ -44,9 +79,10 @@ Or download release tarballs from GitHub Releases:
 - [Droid](docs/factory.md) — Browser cookies + WorkOS token flows for Factory usage + billing.
 - [Copilot](docs/copilot.md) — GitHub device flow + Copilot internal usage API.
 - [z.ai](docs/zai.md) — API token for quota + MCP windows.
+- [Manus](docs/manus.md) — Browser `session_id` auth for credit balance, monthly credits, and daily refresh tracking.
 - [MiniMax](docs/minimax.md) — API token, cookie header, or browser cookies for coding-plan usage.
 - [Kimi](docs/kimi.md) — Auth token (JWT from `kimi-auth` cookie) for weekly quota + 5‑hour rate limit.
-- [Kimi K2](docs/kimi-k2.md) — API key for credit-based usage totals.
+- [Kimi K2 (unofficial)](docs/kimi-k2.md) — Legacy API key flow for credit-based usage totals.
 - [Kilo](docs/kilo.md) — API token with CLI-auth fallback for Kilo Pass usage.
 - [Kiro](docs/kiro.md) — CLI-based usage; monthly credits + bonus credits.
 - [Vertex AI](docs/vertexai.md) — Google Cloud gcloud OAuth with token cost tracking from local Claude logs.
@@ -55,12 +91,18 @@ Or download release tarballs from GitHub Releases:
 - [Ollama](docs/ollama.md) — Browser cookies for Ollama Cloud usage windows.
 - [JetBrains AI](docs/jetbrains.md) — Local XML-based quota from JetBrains IDE configuration; monthly credits tracking.
 - [Warp](docs/warp.md) — API token for GraphQL request limits and monthly credits.
+- [ElevenLabs](docs/elevenlabs.md) — API key for character credits and voice slot usage.
 - [OpenRouter](docs/openrouter.md) — API token for credit-based usage tracking across multiple AI providers.
 - Perplexity — Account usage credits from Perplexity usage data.
 - [Abacus AI](docs/abacus.md) — Browser cookie auth for ChatLLM/RouteLLM compute credit tracking.
 - Mistral — Browser cookies for monthly spend tracking.
 - [DeepSeek](docs/deepseek.md) — API key for credit balance tracking (paid vs. granted breakdown).
+- [Moonshot / Kimi API](docs/moonshot.md) — API key for Moonshot/Kimi API account balance tracking.
+- [Venice](docs/venice.md) — API key for DIEM or USD balance tracking.
 - [Codebuff](docs/codebuff.md) — API token (or `~/.config/manicode/credentials.json`) for credit balance + weekly rate limit.
+- [Crof](docs/crof.md) — API key for dollar credit balance and request quota tracking.
+- [Command Code](docs/command-code.md) — Browser cookies for monthly USD credits from Command Code billing.
+- [StepFun](docs/stepfun.md) — Username + password login for Step Plan rate limits (5‑hour + weekly windows) and subscription plan name.
 - Open to new providers: [provider authoring guide](docs/provider.md).
 
 ## Icon & Screenshot
@@ -139,8 +181,8 @@ Dev loop:
 ```bash
 ./Scripts/compile_and_run.sh
 ./Scripts/compile_and_run.sh --test  # also run swift test before packaging/relaunching
-pnpm check                           # SwiftFormat + SwiftLint
-pnpm docs:list                       # list docs with frontmatter summaries
+make check                           # SwiftFormat + SwiftLint
+make docs-list                       # list docs with frontmatter summaries
 ```
 
 CLI install:
@@ -156,6 +198,9 @@ CLI install:
 
 ## Looking for a Windows version?
 - [Win-CodexBar](https://github.com/Finesssee/Win-CodexBar)
+
+## Linux desktop integration?
+- [codexbar-waybar](https://github.com/Marouan-chak/codexbar-waybar) — Waybar custom module + GTK4 popover for Hyprland / Sway / other Wayland compositors, built on top of the bundled Linux CLI.
 
 ## Credits
 Inspired by [ccusage](https://github.com/ryoppippi/ccusage) (MIT), specifically the cost usage tracking.

@@ -11,13 +11,23 @@ struct SettingsDefaultsState {
     var debugKeepCLISessionsAlive: Bool
     var statusChecksEnabled: Bool
     var sessionQuotaNotificationsEnabled: Bool
+    var quotaWarningNotificationsEnabled: Bool
+    var quotaWarningThresholdsRaw: [Int]
+    var quotaWarningSessionThresholdsRaw: [Int]
+    var quotaWarningWeeklyThresholdsRaw: [Int]
+    var quotaWarningSessionEnabled: Bool
+    var quotaWarningWeeklyEnabled: Bool
+    var quotaWarningSoundEnabled: Bool
+    var quotaWarningMarkersVisible: Bool
     var usageBarsShowUsed: Bool
     var resetTimesShowAbsolute: Bool
+    var providerChangelogLinksEnabled: Bool
     var menuBarShowsBrandIconWithPercent: Bool
     var menuBarDisplayModeRaw: String?
     var codexMenuBarVisualizationModeRaw: String?
+    var kiroMenuBarDisplayModeRaw: String?
     var historicalTrackingEnabled: Bool
-    var showAllTokenAccountsInMenu: Bool
+    var multiAccountMenuLayoutRaw: String
     var menuBarMetricPreferencesRaw: [String: String]
     var costUsageEnabled: Bool
     var hidePersonalInfo: Bool
@@ -39,4 +49,5 @@ struct SettingsDefaultsState {
     var mergedOverviewSelectedProvidersRaw: [String]
     var selectedMenuProviderRaw: String?
     var providerDetectionCompleted: Bool
+    var appLanguageRaw: String?
 }

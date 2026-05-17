@@ -33,6 +33,25 @@ public struct OpenCodeGoUsageFetcher: Sendable {
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
 
+    private final class RedirectGuardDelegate: NSObject, URLSessionTaskDelegate {
+        func urlSession(
+            _ session: URLSession,
+            task: URLSessionTask,
+            willPerformHTTPRedirection response: HTTPURLResponse,
+            newRequest request: URLRequest,
+            completionHandler: @escaping (URLRequest?) -> Void)
+        {
+            guard OpenCodeGoUsageFetcher.allowsRedirect(
+                from: task.originalRequest?.url,
+                to: request.url)
+            else {
+                completionHandler(nil)
+                return
+            }
+            completionHandler(request)
+        }
+    }
+
     private struct ServerRequest {
         let serverID: String
         let args: String?
@@ -73,14 +92,24 @@ public struct OpenCodeGoUsageFetcher: Sendable {
         "renewAt",
         "renew_at",
     ]
+    private static let redirectGuardDelegate = RedirectGuardDelegate()
+    private static let redirectGuardSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        return URLSession(
+            configuration: configuration,
+            delegate: OpenCodeGoUsageFetcher.redirectGuardDelegate,
+            delegateQueue: nil)
+    }()
 
     public static func fetchUsage(
         cookieHeader: String,
         timeout: TimeInterval,
         now: Date = Date(),
         workspaceIDOverride: String? = nil,
-        session: URLSession = .shared) async throws -> OpenCodeGoUsageSnapshot
+        session: URLSession? = nil) async throws -> OpenCodeGoUsageSnapshot
     {
+        let session = session ?? self.redirectGuardSession
         guard let requestCookieHeader = OpenCodeWebCookieSupport.requestCookieHeader(from: cookieHeader) else {
             throw OpenCodeGoUsageError.invalidCredentials
         }
@@ -98,6 +127,15 @@ public struct OpenCodeGoUsageFetcher: Sendable {
             timeout: timeout,
             session: session)
         return try self.parseSubscription(text: subscriptionText, now: now)
+    }
+
+    static func allowsRedirect(from sourceURL: URL?, to destinationURL: URL?) -> Bool {
+        guard let sourceHost = sourceURL?.host?.lowercased(),
+              let destinationHost = destinationURL?.host?.lowercased(),
+              sourceHost == destinationHost,
+              destinationURL?.scheme?.lowercased() == "https"
+        else { return false }
+        return true
     }
 
     public static func dashboardURL(workspaceID raw: String?) -> URL {
@@ -604,15 +642,14 @@ public struct OpenCodeGoUsageFetcher: Sendable {
             urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
 
-        let (data, response) = try await session.data(for: urlRequest)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw OpenCodeGoUsageError.networkError("Invalid response")
-        }
+        let httpResponse = try await session.response(for: urlRequest)
 
         guard httpResponse.statusCode == 200 else {
-            let bodyText = String(data: data, encoding: .utf8) ?? ""
-            let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? "unknown"
-            Self.log.error("OpenCode Go returned \(httpResponse.statusCode) (type=\(contentType) length=\(data.count))")
+            let bodyText = String(data: httpResponse.data, encoding: .utf8) ?? ""
+            let contentType = httpResponse.response.value(forHTTPHeaderField: "Content-Type") ?? "unknown"
+            let dataLength = httpResponse.data.count
+            Self.log.error(
+                "OpenCode Go returned \(httpResponse.statusCode) (type=\(contentType) length=\(dataLength))")
             if self.looksSignedOut(text: bodyText) {
                 throw OpenCodeGoUsageError.invalidCredentials
             }
@@ -625,7 +662,7 @@ public struct OpenCodeGoUsageFetcher: Sendable {
             throw OpenCodeGoUsageError.apiError("HTTP \(httpResponse.statusCode)")
         }
 
-        guard let text = String(data: data, encoding: .utf8) else {
+        guard let text = String(data: httpResponse.data, encoding: .utf8) else {
             throw OpenCodeGoUsageError.parseFailed("Response was not UTF-8.")
         }
         return text
@@ -646,12 +683,9 @@ public struct OpenCodeGoUsageFetcher: Sendable {
             "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             forHTTPHeaderField: "Accept")
 
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw OpenCodeGoUsageError.networkError("Invalid response")
-        }
+        let httpResponse = try await session.response(for: request)
         guard httpResponse.statusCode == 200 else {
-            let bodyText = String(data: data, encoding: .utf8) ?? ""
+            let bodyText = String(data: httpResponse.data, encoding: .utf8) ?? ""
             if self.looksSignedOut(text: bodyText) {
                 throw OpenCodeGoUsageError.invalidCredentials
             }
@@ -663,7 +697,7 @@ public struct OpenCodeGoUsageFetcher: Sendable {
             }
             throw OpenCodeGoUsageError.apiError("HTTP \(httpResponse.statusCode)")
         }
-        guard let text = String(data: data, encoding: .utf8) else {
+        guard let text = String(data: httpResponse.data, encoding: .utf8) else {
             throw OpenCodeGoUsageError.parseFailed("Response was not UTF-8.")
         }
         return text
